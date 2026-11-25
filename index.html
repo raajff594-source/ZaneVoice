@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#09090d">
+<title>Zane Voice Changer</title>
+<style>
+:root{color-scheme:dark;--bg:#09090d;--panel:#15151d;--red:#e11d48;--muted:#a1a1aa}
+*{box-sizing:border-box}
+body{margin:0;background:radial-gradient(circle at 50% -15%,#481225 0,#15101a 34%,var(--bg) 70%);color:#fff;font-family:system-ui,-apple-system,Segoe UI,sans-serif;min-height:100vh}
+main{width:min(680px,100%);margin:auto;padding:25px 17px 40px}
+header{text-align:center;padding:18px 0 24px}
+.logo{width:66px;height:66px;border:1px solid #fb7185;border-radius:20px;display:grid;place-items:center;margin:0 auto 13px;background:linear-gradient(145deg,#4c1026,#160b16);font-size:30px;box-shadow:0 0 35px #e11d4833}
+h1{margin:0;font-size:clamp(27px,7vw,38px);letter-spacing:1px}
+h1 span{color:#fb456d}
+.sub{color:var(--muted);margin:7px 0 0;font-size:14px}
+.panel{background:#15151deF;border:1px solid #ffffff14;border-radius:20px;padding:18px;margin:13px 0;box-shadow:0 12px 35px #0004}
+.status{display:flex;align-items:center;gap:9px;color:#d4d4d8;font-size:13px}
+.dot{width:9px;height:9px;border-radius:50%;background:#71717a}
+.dot.live{background:#fb456d;box-shadow:0 0 12px #fb456d}
+.timer{text-align:center;font-size:39px;font-weight:700;font-variant-numeric:tabular-nums;margin:20px 0 16px}
+.actions{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
+button{border:0;border-radius:13px;padding:13px 17px;background:#292933;color:#fff;font-weight:650;font-size:14px;cursor:pointer}
+button:disabled{opacity:.4;cursor:not-allowed}
+.primary{background:linear-gradient(135deg,#fb456d,#be123c);min-width:145px}
+button:active{transform:scale(.98)}
+h2{font-size:16px;margin:0 0 14px}
+.effects{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+.effect{background:#20202a;border:1px solid #ffffff12;text-align:left;min-height:76px}
+.effect.selected{border:1px solid #fb456d;background:#421426}
+.effect b{display:block;font-size:15px;margin-bottom:4px}
+.effect small{color:#aaa}
+select{width:100%;background:#20202a;color:white;border:1px solid #ffffff20;border-radius:12px;padding:13px;font-size:15px}
+.note{color:#a1a1aa;font-size:12px;line-height:1.5;margin:12px 0 0}
+audio{width:100%;margin-top:14px}
+#message{font-size:13px;color:#fda4af;min-height:20px;margin-top:12px;text-align:center}
+footer{text-align:center;color:#71717a;font-size:12px;padding:16px}
+@media(min-width:520px){.effects{grid-template-columns:repeat(4,1fr)}.effect{padding:12px 9px}}
+</style>
+</head>
+<body>
+<main>
+<header>
+  <div class="logo">🎙️</div>
+  <h1>ZANE <span>VOICE</span></h1>
+  <p class="sub">VOICE CHANGER · RECORD · TRANSFORM</p>
+</header>
+
+<section class="panel">
+  <div class="status"><span class="dot" id="dot"></span><span id="status">Ready to record</span></div>
+  <div class="timer" id="timer">00:00</div>
+  <div class="actions">
+    <button class="primary" id="recordBtn">● Start recording</button>
+    <button id="stopBtn" disabled>■ Stop</button>
+  </div>
+  <p class="note">Allow microphone access when Chrome asks. Record a short test first.</p>
+</section>
+
+<section class="panel">
+  <h2>Choose your voice effect</h2>
+  <div class="effects">
+    <button class="effect selected" data-effect="normal"><b>🎙️ Normal</b><small>Original voice</small></button>
+    <button class="effect" data-effect="demon"><b>👹 Demon</b><small>Deep, dark tone</small></button>
+    <button class="effect" data-effect="robot"><b>🤖 Robot</b><small>Metallic sound</small></button>
+    <button class="effect" data-effect="alien"><b>👽 Alien</b><small>Higher, strange tone</small></button>
+    <button class="effect" data-effect="echo"><b>🔊 Echo</b><small>Repeating sound</small></button>
+  </div>
+</section>
+
+<section class="panel">
+  <h2>Your recording</h2>
+  <div class="actions">
+    <button id="playBtn" disabled>▶ Play effect</button>
+    <button id="downloadBtn" disabled>⬇ Download WAV</button>
+  </div>
+  <audio id="player" controls hidden></audio>
+  <p class="note">After recording, choose an effect and tap Play effect. Download WAV saves the transformed audio.</p>
+  <div id="message" role="status"></div>
+</section>
+<footer> ZANE VOICE CHANGER · Made for fun </footer>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+let recorder, chunks=[], stream, recordedBlob=null, recordedBuffer=null;
+let recording=false, startedAt=0, timerInterval=null, selectedEffect="normal", currentUrl=null;
+
+function setMessage(text){$("message").textContent=text;}
+function setStatus(text,live=false){$("status").textContent=text;$("dot").classList.toggle("live",live);}
+function formatTime(seconds){const m=Math.floor(seconds/60),s=Math.floor(seconds%60);return String(m).padStart(2,"0")+":"+String(s).padStart(2,"0");}
+
+$("recordBtn").addEventListener("click",async()=>{
+  if(recording)return;
+  try{
+    stream=await navigator.mediaDevices.getUserMedia({audio:true});
+    chunks=[];
+    const mime=MediaRecorder.isTypeSupported("audio/webm;codecs=opus")?"audio/webm;codecs=opus":"audio/webm";
+    recorder=new MediaRecorder(stream,{mimeType:mime});
+    recorder.ondataavailable=e=>{if(e.data.size)chunks.push(e.data);};
+    recorder.onstop=async()=>{
+      recordedBlob=new Blob(chunks,{type:recorder.mimeType||"audio/webm"});
+      stream.getTracks().forEach(t=>t.stop());
+      try{
+        const ctx=new AudioContext();
+        const bytes=await recordedBlob.arrayBuffer();
+        recordedBuffer=await ctx.decodeAudioData(bytes);
+        await ctx.close();
+        $("playBtn").disabled=false;$("downloadBtn").disabled=false;
+        setStatus("Recording ready");
+        setMessage("Recording saved in this page. Choose an effect and play it.");
+      }catch(err){setMessage("This browser could not read the recording. Try recording again in Chrome.");}
+    };
+    recorder.start();recording=true;startedAt=Date.now();
+    $("recordBtn").disabled=true;$("stopBtn").disabled=false;
+    setStatus("Recording…",true);setMessage("Recording in progress");
+    timerInterval=setInterval(()=>$("timer").textContent=formatTime((Date.now()-startedAt)/1000),250);
+  }catch(err){
+    setMessage("Microphone access was blocked. Allow microphone permission in Chrome site settings.");
+    setStatus("Microphone unavailable");
+  }
+});
+$("stopBtn").addEventListener("click",()=>{
+  if(!recording)return;
+  recording=false;clearInterval(timerInterval);recorder.stop();
+  $("recordBtn").disabled=false;$("stopBtn").disabled=true;
+  setStatus("Processing recording…");
+});
+
+document.querySelectorAll(".effect").forEach(button=>{
+  button.addEventListener("click",()=>{
+    document.querySelectorAll(".effect").forEach(b=>b.classList.remove("selected"));
+    button.classList.add("selected");selectedEffect=button.dataset.effect;
+    setMessage("Selected: "+button.querySelector("b").textContent);
+  });
+});
+
+async function makeProcessedBuffer(){
+  if(!recordedBuffer)throw new Error("Record your voice first.");
+  const rate=recordedBuffer.sampleRate;
+  const duration=recordedBuffer.duration;
+  const extra=selectedEffect==="echo"?1.5:0;
+  const offline=new OfflineAudioContext(1,Math.ceil((duration+extra)*rate),rate);
+  const source=offline.createBufferSource();
+  source.buffer=recordedBuffer;
+  const gain=offline.createGain();
+  source.connect(gain);
+  if(selectedEffect==="demon"){
+    source.playbackRate.value=.78;
+    const low=offline.createBiquadFilter();low.type="lowpass";low.frequency.value=850;
+    gain.connect(low);low.connect(offline.destination);
+  }else if(selectedEffect==="alien"){
+    source.playbackRate.value=1.35;
+    const high=offline.createBiquadFilter();high.type="highpass";high.frequency.value=180;
+    gain.connect(high);high.connect(offline.destination);
+  }else if(selectedEffect==="robot"){
+    const wave=offline.createWaveShaper();
+    const curve=new Float32Array(44100);
+    for(let i=0;i<curve.length;i++){const x=i*2/(curve.length-1)-1;curve[i]=Math.tanh(5*x);}
+    wave.curve=curve;wave.oversample="4x";
+    const lfo=offline.createOscillator(),lfoGain=offline.createGain();
+    lfo.frequency.value=28;lfoGain.gain.value=0.22;
+    lfo.connect(lfoGain);lfoGain.connect(gain.gain);lfo.start(0);
+    gain.connect(wave);wave.connect(offline.destination);
+  }else if(selectedEffect==="echo"){
+    const delay=offline.createDelay(1);delay.delayTime.value=.28;
+    const feedback=offline.createGain();feedback.gain.value=.38;
+    gain.connect(offline.destination);gain.connect(delay);
+    delay.connect(feedback);feedback.connect(delay);feedback.connect(offline.destination);
+  }else{
+    gain.connect(offline.destination);
+  }
+  source.start(0);
+  return await offline.startRendering();
+}
+function bufferToWav(buffer){
+  const channels=buffer.numberOfChannels,length=buffer.length;
+  const bytesPerSample=2,blockAlign=channels*bytesPerSample;
+  const arrayBuffer=new ArrayBuffer(44+length*blockAlign),view=new DataView(arrayBuffer);
+  const write=(offset,str)=>{for(let i=0;i<str.length;i++)view.setUint8(offset+i,str.charCodeAt(i));};
+  write(0,"RIFF");view.setUint32(4,36+length*blockAlign,true);write(8,"WAVE");
+  write(12,"fmt ");view.setUint32(16,16,true);view.setUint16(20,1,true);
+  view.setUint16(22,channels,true);view.setUint32(24,buffer.sampleRate,true);
+  view.setUint32(28,buffer.sampleRate*blockAlign,true);view.setUint16(32,blockAlign,true);
+  view.setUint16(34,16,true);write(36,"data");view.setUint32(40,length*blockAlign,true);
+  let offset=44;
+  const channelData=Array.from({length:channels},(_,i)=>buffer.getChannelData(i));
+  for(let i=0;i<length;i++)for(let c=0;c<channels;c++){
+    let sample=Math.max(-1,Math.min(1,channelData[c][i]));
+    view.setInt16(offset,sample<0?sample*32768:sample*32767,true);offset+=2;
+  }
+  return new Blob([arrayBuffer],{type:"audio/wav"});
+}
+$("playBtn").addEventListener("click",async()=>{
+  try{
+    $("playBtn").disabled=true;setMessage("Applying effect…");
+    const processed=await makeProcessedBuffer();
+    const wav=bufferToWav(processed);
+    if(currentUrl)URL.revokeObjectURL(currentUrl);
+    currentUrl=URL.createObjectURL(wav);
+    $("player").src=currentUrl;$("player").hidden=false;
+    await $("player").play();setMessage("Playing processed voice.");
+  }catch(err){setMessage(err.message||"Could not process audio.");}
+  finally{$("playBtn").disabled=!recordedBuffer;}
+});
+$("downloadBtn").addEventListener("click",async()=>{
+  try{
+    $("downloadBtn").disabled=true;setMessage("Preparing WAV download…");
+    const processed=await makeProcessedBuffer();
+    const wav=bufferToWav(processed),url=URL.createObjectURL(wav);
+    const a=document.createElement("a");a.href=url;a.download="zane-voice-"+selectedEffect+".wav";
+    document.body.appendChild(a);a.click();a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),1500);
+    setMessage("Download started. Check your Downloads folder.");
+  }catch(err){setMessage(err.message||"Could not export audio.");}
+  finally{$("downloadBtn").disabled=!recordedBuffer;}
+});
+</script>
+</body>
+</html>
